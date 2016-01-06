@@ -3,7 +3,7 @@
  * Plugin Name: BBConnect Quicklinks
  * Plugin URI: n/a
  * Description: An addon to provide a quicklink framework for BBConnect
- * Version: 0.0.2
+ * Version: 0.0.3
  * Author: Brown Box
  * Author URI: http://brownbox.net.au
  * License: Proprietary Brown Box
