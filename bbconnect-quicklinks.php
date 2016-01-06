@@ -3,7 +3,7 @@
  * Plugin Name: BBConnect Quicklinks
  * Plugin URI: n/a
  * Description: An addon to provide a quicklink framework for BBConnect
- * Version: 0.0.1
+ * Version: 0.0.2
  * Author: Brown Box
  * Author URI: http://brownbox.net.au
  * License: Proprietary Brown Box
@@ -66,33 +66,29 @@ function bbconnect_show_quicklinks($dirname, array $user_ids, array $args = arra
 #bbconnect #quicklinks-wrapper li a.s-quicklinks:hover { background: #ccc none repeat scroll 0 0;}
 </style>
 <?php
-
-$current_user = wp_get_current_user();
-$roles = $current_user->roles;
-if( $roles[0] !== 'content_manager' ) {
-
+    $class_dir = dirname(__FILE__).'/classes/'.$dirname.'/';
+    if (file_exists($class_dir) && is_dir($class_dir)) {
 ?>
 		<div id="quicklinks-wrapper"><strong>QUICKLINKS</strong>
 			<ul>
 <?php
-    $class_dir = dirname(__FILE__).'/classes/'.$dirname.'/';
-    $dir = opendir($class_dir);
-    while (false !== ($filename = readdir($dir))) {
-        if ($filename == '.' || $filename == '..') continue;
-        $files[] = $filename;
-    }
-    closedir($dir);
-    sort($files);
+        $dir = opendir($class_dir);
+        while (false !== ($filename = readdir($dir))) {
+            if ($filename == '.' || $filename == '..') continue;
+            $files[] = $filename;
+        }
+        closedir($dir);
+        sort($files);
 
-    foreach ($files as $filename) {
-        if (strpos($filename, '.php') !== false) {
-            $quicklink_name = $dirname.'_'.array_shift(explode('.', $filename)).'_quicklink';
-            if (class_exists($quicklink_name)) {
-                $quicklink = new $quicklink_name();
-                $quicklink->show_link($user_ids, $args);
+        foreach ($files as $filename) {
+            if (strpos($filename, '.php') !== false) {
+                $quicklink_name = $dirname.'_'.array_shift(explode('.', $filename)).'_quicklink';
+                if (class_exists($quicklink_name)) {
+                    $quicklink = new $quicklink_name();
+                    $quicklink->show_link($user_ids, $args);
+                }
             }
         }
-    }
 ?>
 	  		</ul>
 		</div>
