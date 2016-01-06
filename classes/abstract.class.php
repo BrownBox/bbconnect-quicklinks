@@ -46,17 +46,17 @@ abstract class bb_modal_quicklink extends bb_quicklink {
         add_thickbox(); // Make sure modal library is loaded
         $function_name = get_class($this).'_action_submit';
 ?>
-        <div id="<?php echo $this->modal_id; ?>" style="display: none;">
-            <div>
-                <h2><?php echo $this->title; ?></h2>
-                <form action="" method="post">
+<div id="<?php echo $this->modal_id; ?>" style="display: none;">
+    <div>
+        <h2><?php echo $this->title; ?></h2>
+        <form action="" method="post">
                     <?php $this->form_contents($user_ids, $args); ?>
-                    <br><input type="submit" class="button action" onclick="return <?php echo $function_name; ?>();" value="Submit">
-                </form>
-            </div>
-        </div>
-        <script type="text/javascript">
-            function <?php echo $function_name; ?>() {
+                    <br> <input type="submit" class="button action" onclick="jQuery(this).val('Processing, please wait...').prop('disabled', true); return <?php echo $function_name; ?>(this);" value="Submit">
+        </form>
+    </div>
+</div>
+<script type="text/javascript">
+            function <?php echo $function_name; ?>(e) {
                 var tableName = '<?php echo $this->title; ?>';
                 var data = {
                         'action': '<?php echo get_class($this); ?>_submit',
@@ -77,24 +77,29 @@ abstract class bb_modal_quicklink extends bb_quicklink {
                     var fieldName = element.attr('name');
                     if (typeof fieldName !== 'undefined') {
                         if (element.hasClass('wp-editor-area') && tinymce.get(fieldName) !== null) {
-                        	data[fieldName] = tinymce.get(fieldName).getContent();
+                            data[fieldName] = tinymce.get(fieldName).getContent();
+                        } else if (element.attr('type') == 'checkbox' || element.attr('type') == 'radio') {
+                            if (element.prop('checked')) {
+                                data[fieldName] = element.val();
+                            }
                         } else {
                             data[fieldName] = element.val();
                         }
                     }
                 });
-            	jQuery.post(ajaxurl, data, function(response) {
-        			if (response == 0) {
-            			var appendTableName = jQuery('#TB_ajaxContent form').find('select.append_table_name').first().children(':selected').text();
-            			if (appendTableName != '') {
-            				tableName += ' - '+appendTableName;
-            			}
+                jQuery.post(ajaxurl, data, function(response) {
+                    if (response == 0) {
+                        var appendTableName = jQuery('#TB_ajaxContent form').find('select.append_table_name').first().children(':selected').text();
+                        if (appendTableName != '') {
+                            tableName += ' - '+appendTableName;
+                        }
+                        jQuery(e).val('Submit').prop('disabled', false);
                         tb_remove();
 <?php
         if ($this->trigger_export) {
 ?>
                         jQuery('.wp-list-table').tableExport({
-                        	tableName:tableName, type:'excel', escape:'false', htmlContent:'false'
+                            tableName:tableName, type:'excel', escape:'false', htmlContent:'false'
                         });
 <?php
         } else {
@@ -103,10 +108,11 @@ abstract class bb_modal_quicklink extends bb_quicklink {
 <?php
         }
 ?>
-        			} else {
-            			alert(response);
-        			}
-        		});
+                    } else {
+                        alert(response);
+                        jQuery(e).val('Submit').prop('disabled', false);
+                    }
+                });
                 return false;
             }
         </script>
@@ -120,31 +126,70 @@ abstract class bb_modal_quicklink extends bb_quicklink {
      * @param integer $type Term ID of primary note type
      * @param integer $subtype Term ID of secondary note type
      * @param array $user_ids List of user IDs to add note to
+     * @param boolean $action_required Whether the note should be marked as requiring action
      */
     public static function add_note($title, $contents, $type, $subtype, array $user_ids, array $args = array(), $action_required = false) {
-        foreach ($user_ids as $user_id) {
-            $data = array(
-                    'post_type' => 'bb_note',
-                    'post_title' => $title,
-                    'post_content' => $contents,
-                    'post_status' => 'publish',
-                    'post_author' => $user_id,
-                    'tax_input' => array(
-                            'bb_note_type' => array(
-                                    $type,
-                                    $subtype,
-                            ),
-                    ),
-            );
+        // Some performance changes
+//         global $wpdb;
+//         $wpdb->query('SET autocommit = 0;');
+        wp_suspend_cache_addition(true);
+        wp_defer_term_counting(true);
+        wp_defer_comment_counting(true);
 
-            $data = array_merge_recursive($data, $args);
+        $data = array(
+                'post_type' => 'bb_note',
+                'post_title' => $title,
+                'post_content' => $contents,
+                'post_status' => 'publish',
+                'tax_input' => array(
+                        'bb_note_type' => array(
+                                $type,
+                                $subtype,
+                        ),
+                ),
+        );
+        $data = array_merge_recursive($data, $args);
+        unset($title, $contents, $type, $subtype, $args);
+
+        foreach ($user_ids as $user_id) {
+            $start = microtime(true);
+
+            $data['post_author'] = $user_id;
 
             $new_post = wp_insert_post($data);
             if ($action_required) {
                 add_post_meta($new_post, '_bbc_action_required', 'true');
             }
+            unset($new_post);
         }
+
+        // Set performance settings back to defaults
+//         $wpdb->query('COMMIT;');
+//         $wpdb->query('SET autocommit = 1;');
+        wp_defer_term_counting(false);
+        wp_defer_comment_counting(false);
+
         return true;
+    }
+
+    /**
+     * Replace the defautl WP _save_post_hook to reduce memory usage when inserting multiple posts
+     * @param integer $post_id
+     * @param WP_Post $post
+     */
+    public static function bb_save_post_hook($post_id, $post) {
+        if ($post->post_type == 'page') {
+            if (!empty($post->page_template)) {
+                if (!update_post_meta($post_id, '_wp_page_template', $post->page_template)) {
+                    add_post_meta($post_id, '_wp_page_template', $post->page_template, true);
+                }
+            }
+            clean_page_cache($post_id);
+            //global $wp_rewrite;
+            //$wp_rewrite->flush_rules();
+        } else {
+            clean_post_cache($post_id);
+        }
     }
 
     /**
@@ -162,9 +207,13 @@ abstract class bb_modal_quicklink extends bb_quicklink {
             }
         }
 ?>
-        <div class="modal-row"><label for="note_type">Note Type:</label><select id="note_type" name="note_type"><?php echo $parent_types ?></select></div>
-        <div class="modal-row"><label for="note_subtype">Note Sub-Type:</label><select id="note_subtype" name="note_subtype"><?php echo $child_types ?></select></div>
-        <script type="text/javascript">
+<div class="modal-row">
+    <label for="note_type">Note Type:</label><select id="note_type" name="note_type"><?php echo $parent_types ?></select>
+</div>
+<div class="modal-row">
+    <label for="note_subtype">Note Sub-Type:</label><select id="note_subtype" name="note_subtype"><?php echo $child_types ?></select>
+</div>
+<script type="text/javascript">
             jQuery(document).ready(function() {
                 filter_subtypes();
                 jQuery('select[name="note_type"]').on('change', function() {
@@ -174,7 +223,7 @@ abstract class bb_modal_quicklink extends bb_quicklink {
             function filter_subtypes() {
                 var e = jQuery('#TB_ajaxContent select[name="note_type"]');
                 if (!e) {
-                	e = jQuery('select[name="note_type"]');
+                    e = jQuery('select[name="note_type"]');
                 }
                 jQuery('#note_subtype option:not(.please_select)').hide();
                 jQuery('#note_subtype option.childof_'+e.find(':selected').val()).show();
